@@ -24,6 +24,57 @@ def apply_guided_filter(image_np, radius, eps):
     filtered_image = np.clip(filtered_image * 255, 0, 255).astype(np.uint8)
     return filtered_image
 
+def apply_low_pass_filter(image_np, cutoff_frequency, filter_strength):
+    # Convert to float32 for FFT
+    image_float = np.float32(image_np)
+    
+    # Process each channel separately
+    result = np.zeros_like(image_float)
+    
+    for c in range(image_float.shape[2]):
+        # Apply Fourier Transform
+        f = np.fft.fft2(image_float[:, :, c])
+        fshift = np.fft.fftshift(f)
+        
+        # Create a low pass filter mask
+        rows, cols = image_float.shape[:2]
+        crow, ccol = rows // 2, cols // 2
+        
+        # Create a mask with high values (1) at low frequencies
+        # and low values (0) at high frequencies
+        mask = np.zeros((rows, cols), np.float32)
+        r = cutoff_frequency
+        center = [crow, ccol]
+        x, y = np.ogrid[:rows, :cols]
+        mask_area = (x - center[0]) ** 2 + (y - center[1]) ** 2 <= r * r
+        mask[mask_area] = 1
+        
+        # Apply smooth transition at the cutoff boundary based on filter_strength
+        # The higher the filter_strength, the more abrupt the transition
+        if filter_strength > 0:
+            # Create distance matrix from center
+            dist_from_center = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2)
+            # Create transition zone
+            transition_zone = (dist_from_center > r) & (dist_from_center <= r + 50/filter_strength)
+            # Apply exponential falloff in transition zone
+            falloff = np.exp(-(dist_from_center[transition_zone] - r) * filter_strength / 10)
+            mask[transition_zone] = falloff
+        
+        # Apply the mask
+        fshift_filtered = fshift * mask
+        
+        # Inverse shift and inverse FFT
+        f_ishift = np.fft.ifftshift(fshift_filtered)
+        img_back = np.fft.ifft2(f_ishift)
+        img_back = np.abs(img_back)
+        
+        # Normalize to original range
+        result[:, :, c] = img_back
+    
+    # Convert back to uint8
+    result = np.clip(result, 0, 255).astype(np.uint8)
+    return result
+
 class TTPlanet_Tile_Preprocessor_GF:
     def __init__(self, blur_strength=3.0, radius=7, eps=0.01):
         self.blur_strength = blur_strength
